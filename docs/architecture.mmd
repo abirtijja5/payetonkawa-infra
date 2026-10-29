@@ -1,0 +1,26 @@
+flowchart TB
+    U["Webshop · Revendeurs · Administrateurs<br/>(Postman, navigateur)"]
+    U -->|"HTTPS + jeton JWT"| GW["Passerelle Nginx :8080<br/>routage · répartition de charge · limitation"]
+    GW -->|"/client"| C
+    GW -->|"/product"| P
+    GW -->|"/order"| O
+
+    subgraph SVC["Micro-services (images Docker, plusieurs instances possibles)"]
+        direction LR
+        C["Service Clients"] --- DBC[("PostgreSQL<br/>Clients")]
+        O["Service Commandes"] --- DBO[("PostgreSQL<br/>Commandes")]
+        P["Service Produits<br/>×2 / ×3"] --- DBP[("PostgreSQL<br/>Produits")]
+    end
+
+    O -.->|"REST : client existe ?"| C
+    O -.->|"REST : produit, prix, stock ?"| P
+
+    MQ{{"RabbitMQ<br/>(événements asynchrones)"}}
+    SVC <==>|"publient et consomment<br/>les événements métier"| MQ
+
+    subgraph MON["Supervision"]
+        direction LR
+        PR["Prometheus<br/>+ alertes"] --> G["Grafana"]
+    end
+    SVC -.->|"/metrics"| PR
+    MQ -.->|"messages par file"| PR
