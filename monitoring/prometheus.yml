@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alert_rules.yml
+
+scrape_configs:
+  # Découverte DNS : toutes les instances d'un service sont collectées (scaling)
+  - job_name: client
+    dns_sd_configs: [{names: [client], type: A, port: 8000}]
+  - job_name: product
+    dns_sd_configs: [{names: [product], type: A, port: 8000}]
+  - job_name: order
+    dns_sd_configs: [{names: [order], type: A, port: 8000}]
+  # Messages échangés sur le broker, par file d'attente
+  - job_name: rabbitmq
+    metrics_path: /metrics/per-object
+    static_configs: [{targets: ["rabbitmq:15692"]}]
