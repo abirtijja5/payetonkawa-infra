@@ -1,0 +1,150 @@
+# PayeTonKawa - plateforme micro-services
+#   docker compose up --build -d
+#   docker compose up -d --scale product=3     (3 instances de l'API Produits)
+# Point d'entrée unique : http://localhost:8080
+name: payetonkawa
+
+x-service-env: &service-env
+  JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
+  DJANGO_DEBUG: ${DJANGO_DEBUG:-0}
+  DB_ENGINE: postgres
+  RABBITMQ_ENABLED: "1"
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_USER: ${RABBITMQ_USER}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+
+x-db-healthcheck: &db-healthcheck
+  test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+  interval: 5s
+  timeout: 5s
+  retries: 10
+
+services:
+  # ---------- Passerelle ----------
+  gateway:
+    image: nginx:1.27-alpine
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:80"
+    depends_on: [client, product, order]
+    restart: unless-stopped
+
+  # ---------- Message broker ----------
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    ports:
+      - "15672:15672"   # interface d'administration
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------- Service Clients ----------
+  client-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: client
+      POSTGRES_USER: client
+      POSTGRES_PASSWORD: ${CLIENT_DB_PASSWORD}
+    volumes: [client-db:/var/lib/postgresql/data]
+    healthcheck: *db-healthcheck
+    restart: unless-stopped
+
+  client:
+    build: ./services/client
+    image: payetonkawa-client
+    environment:
+      <<: *service-env
+      DJANGO_SECRET_KEY: ${CLIENT_SECRET_KEY}
+      URL_PREFIX: /client
+      DB_HOST: client-db
+      DB_PASSWORD: ${CLIENT_DB_PASSWORD}
+    depends_on:
+      client-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    restart: unless-stopped
+
+  # ---------- Service Produits ----------
+  product-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: product
+      POSTGRES_USER: product
+      POSTGRES_PASSWORD: ${PRODUCT_DB_PASSWORD}
+    volumes: [product-db:/var/lib/postgresql/data]
+    healthcheck: *db-healthcheck
+    restart: unless-stopped
+
+  product:
+    build: ./services/product
+    image: payetonkawa-product
+    environment:
+      <<: *service-env
+      DJANGO_SECRET_KEY: ${PRODUCT_SECRET_KEY}
+      URL_PREFIX: /product
+      DB_HOST: product-db
+      DB_PASSWORD: ${PRODUCT_DB_PASSWORD}
+    depends_on:
+      product-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    restart: unless-stopped
+
+  # ---------- Service Commandes ----------
+  order-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: order
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD}
+    volumes: [order-db:/var/lib/postgresql/data]
+    healthcheck: *db-healthcheck
+    restart: unless-stopped
+
+  order:
+    build: ./services/order
+    image: payetonkawa-order
+    environment:
+      <<: *service-env
+      DJANGO_SECRET_KEY: ${ORDER_SECRET_KEY}
+      URL_PREFIX: /order
+      DB_HOST: order-db
+      DB_PASSWORD: ${ORDER_DB_PASSWORD}
+      CLIENT_SERVICE_URL: http://client:8000
+      PRODUCT_SERVICE_URL: http://product:8000
+    depends_on:
+      order-db: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    restart: unless-stopped
+
+  # ---------- Supervision ----------
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+volumes:
+  client-db:
+  product-db:
+  order-db:
