@@ -1,0 +1,24 @@
+groups:
+  - name: payetonkawa
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"client|product|order"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Le service {{ $labels.job }} ne répond plus"
+      - alert: TauxErreurs5xxEleve
+        expr: |
+          sum by (job) (rate(django_http_responses_total_by_status_total{status=~"5.."}[5m]))
+          / sum by (job) (rate(django_http_responses_total_by_status_total[5m])) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Plus de 5 % d'erreurs serveur sur {{ $labels.job }}"
+      - alert: LatenceElevee
+        expr: |
+          histogram_quantile(0.95, sum by (job, le) (rate(django_http_requests_latency_seconds_by_view_method_bucket[5m]))) > 1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "95 % des requêtes de {{ $labels.job }} prennent plus d'1 s"

@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: PayeTonKawa
+    folder: PayeTonKawa
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
