@@ -1,0 +1,55 @@
+# Tests d'intégration de la plateforme complète (dépôt payetonkawa-infra)
+# Récupère les 3 services, démarre tout avec Docker Compose (2 instances de Produits),
+# puis exécute la collection Postman avec newman contre l'API déployée.
+name: Tests d'intégration
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+  workflow_dispatch:      # lancement manuel
+  schedule:
+    - cron: "0 5 * * 1-5" # chaque matin en semaine
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Récupérer les micro-services
+        run: |
+          for s in client product order; do
+            git clone --depth 1 --branch "${GITHUB_BASE_REF:-develop}" \
+              "https://x-access-token:${{ secrets.REPOS_TOKEN || github.token }}@github.com/${{ github.repository_owner }}/payetonkawa-$s.git" \
+              services/$s || git clone --depth 1 \
+              "https://x-access-token:${{ secrets.REPOS_TOKEN || github.token }}@github.com/${{ github.repository_owner }}/payetonkawa-$s.git" services/$s
+          done
+      - name: Démarrer la plateforme
+        run: |
+          cp .env.example .env
+          docker compose up -d --build --scale product=2
+          for i in $(seq 1 60); do curl -sf http://localhost:8080/product/health/ && break; sleep 3; done
+      - name: Données de test
+        run: |
+          docker compose exec -T -e DJANGO_SUPERUSER_EMAIL=admin@payetonkawa.fr \
+            -e DJANGO_SUPERUSER_PASSWORD='AdminKawa!2026' -e DJANGO_SUPERUSER_NOM=Admin \
+            -e DJANGO_SUPERUSER_PRENOM=CI client python manage.py createsuperuser --noinput
+          docker compose exec -T product python manage.py seed_products
+      - name: Collection Postman (newman)
+        run: |
+          npm install -g newman newman-reporter-htmlextra
+          newman run postman/PayeTonKawa.postman_collection.json \
+            -e postman/PayeTonKawa.local.postman_environment.json \
+            --delay-request 300 -r cli,htmlextra --reporter-htmlextra-export rapport-newman.html
+      - name: Scénario de démonstration
+        run: pip install requests && python scripts/demo.py
+      - name: Journaux en cas d'échec
+        if: failure()
+        run: docker compose logs --tail=200
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rapport-newman
+          path: rapport-newman.html
+      - if: always()
+        run: docker compose down -v
