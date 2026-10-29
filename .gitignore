@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+data/
+*.sqlite3
+.coverage
+coverage.xml
+htmlcov/
+.idea/
+.vscode/
+staticfiles/
+# Les micro-services ont chacun leur propre dépôt Git
+services/
