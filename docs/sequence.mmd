@@ -1,0 +1,18 @@
+sequenceDiagram
+    autonumber
+    actor U as Restaurateur
+    participant C as Service Clients
+    participant O as Service Commandes
+    participant P as Service Produits
+    participant MQ as RabbitMQ
+    U->>C: POST /api/auth/login/
+    C-->>U: jeton JWT (access)
+    U->>O: POST /api/orders/ + JWT
+    O->>P: GET /api/products/{id}/ (existe ? stock ?)
+    P-->>O: prix, stock
+    O->>O: calcul du total, enregistrement
+    O-)MQ: publie order.created
+    O-->>U: 201 Commande créée
+    MQ-)P: order.created
+    P->>P: stock = stock - quantité
+    P-)MQ: publie product.stock_updated
